@@ -112,7 +112,6 @@ for ano in anos:
         df_agg.columns       = [c.lower() for c in df_agg.columns]
 
         # INSERT OR REPLACE respeita a PRIMARY KEY — não duplica
-        df_agg.to_sql("exportacoes", conn, if_exists="append", index=False, method="multi")
         df_agg.to_sql("exportacoes_temp", conn, if_exists="replace", index=False)
         conn.execute("""
             INSERT OR REPLACE INTO exportacoes
