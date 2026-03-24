@@ -109,7 +109,8 @@ for ano in anos:
         df_agg["categoria"]  = df_agg["CO_NCM"].map(ncm_categoria)
         df_agg["produto"]    = df_agg["CO_NCM"].map(ncm_produto)
         df_agg["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        df_agg.columns       = [c.lower() for c in df_agg.columns]
+        df_agg.columns = [c.lower() for c in df_agg.columns]
+        df_agg = df_agg[["co_ano", "co_mes", "co_ncm", "categoria", "produto", "vl_fob", "kg_liquido", "updated_at"]]
 
         # INSERT OR REPLACE respeita a PRIMARY KEY — não duplica
         df_agg.to_sql("exportacoes_temp", conn, if_exists="replace", index=False)
