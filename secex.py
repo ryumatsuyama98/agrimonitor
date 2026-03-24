@@ -12,7 +12,7 @@ dfs = []
 
 for url, ano in [(url_2025, 2025), (url_2026, 2026)]:
     print(f"Baixando {ano}...")
-    r = requests.get(url, stream=True)
+    r = requests.get(url, stream=True, verify=False)
     df = pd.read_csv(io.StringIO(r.content.decode("latin1")), sep=";")
     df = df[df["CO_NCM"].isin(ncms)]
     dfs.append(df)
