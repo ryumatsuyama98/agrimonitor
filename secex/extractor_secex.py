@@ -50,10 +50,19 @@ conn.commit()
 
 # ── Descobre a partir de qual ano buscar ───────────────────────────────────────
 cursor = conn.execute("""
-    SELECT co_ano FROM exportacoes
+    SELECT co_ano, co_mes FROM exportacoes
     ORDER BY co_ano DESC, co_mes DESC
     LIMIT 1
 """)
+row = cursor.fetchone()
+
+if row:
+    ultimo_ano, ultimo_mes = row
+    print(f"Banco existente — último dado: {ultimo_mes}/{ultimo_ano}")
+    anos = list(range(ultimo_ano, datetime.now().year + 1))
+else:
+    print("Banco vazio — carga histórica completa desde 1997.")
+    anos = list(range(1997, datetime.now().year + 1))
 row = cursor.fetchone()
 
 if row:
