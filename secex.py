@@ -1,32 +1,38 @@
 import requests
-import pandas as pd
-import time
 import json
+import time
 
-ncms = ["12011000", "12019000"]
-todos = []
-
-for ncm in ncms:
-    payload = {
+# Testa diferentes endpoints e formatos
+testes = [
+    ("GET /general/year/month", "GET", "https://api-comexstat.mdic.gov.br/general/2025/1", {}),
+    ("GET com city", "GET", "https://api-comexstat.mdic.gov.br/general", {
         "flow": "export",
-        "monthDetail": True,
-        "yearStart": 2025,
-        "monthStart": 1,
-        "yearEnd": 2026,
-        "monthEnd": 2,
-        "filters": [
-            {"filter": "ncm", "values": [ncm]}
-        ],
-        "details": ["ncm"],
-        "metrics": ["metricFOB", "metricKG"]
-    }
-    
-    r = requests.post(
-        "https://api-comexstat.mdic.gov.br/general",
-        json=payload,
-        headers={"Content-Type": "application/json"}
-    )
+        "monthDetail": "true",
+        "yearStart": "2025",
+        "monthStart": "01",
+        "yearEnd": "2025",
+        "monthEnd": "03",
+        "ncm": "12019000"
+    }),
+    ("GET ncm sem colchetes", "GET", "https://api-comexstat.mdic.gov.br/general", {
+        "flow": "export",
+        "monthDetail": "true",
+        "yearStart": "2025",
+        "monthStart": "01",
+        "yearEnd": "2025",
+        "monthEnd": "03",
+        "typeForm": "ncm",
+        "filter": "12019000"
+    }),
+]
+
+for nome, metodo, url, params in testes:
+    print(f"\n=== {nome} ===")
+    if metodo == "GET":
+        r = requests.get(url, params=params)
+    else:
+        r = requests.post(url, json=params)
+    print(f"URL final: {r.url}")
     data = r.json()
-    print(f"\n--- NCM {ncm} ---")
-    print(json.dumps(data, indent=2, ensure_ascii=False))
-    time.sleep(12)
+    print(json.dumps(data, indent=2, ensure_ascii=False)[:500])
+    time.sleep(13)
