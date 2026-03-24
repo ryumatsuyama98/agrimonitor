@@ -1,24 +1,31 @@
 import requests
 import pandas as pd
-
-url = "https://api-comexstat.mdic.gov.br/general"
-params = {
-    "flow": "export",
-    "monthDetail": "true",
-    "yearStart": "2025",
-    "monthStart": "01",
-    "yearEnd": "2026",
-    "monthEnd": "02",
-}
+import time
+import json
 
 ncms = ["12011000", "12019000"]
 todos = []
 
-import time
-import json
-
 for ncm in ncms:
-    r = requests.get(url, params={**params, "ncm[]": ncm})
+    payload = {
+        "flow": "export",
+        "monthDetail": True,
+        "yearStart": 2025,
+        "monthStart": 1,
+        "yearEnd": 2026,
+        "monthEnd": 2,
+        "filters": [
+            {"filter": "ncm", "values": [ncm]}
+        ],
+        "details": ["ncm"],
+        "metrics": ["metricFOB", "metricKG"]
+    }
+    
+    r = requests.post(
+        "https://api-comexstat.mdic.gov.br/general",
+        json=payload,
+        headers={"Content-Type": "application/json"}
+    )
     data = r.json()
     print(f"\n--- NCM {ncm} ---")
     print(json.dumps(data, indent=2, ensure_ascii=False))
