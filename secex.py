@@ -1,4 +1,3 @@
-cat > secex.py << 'EOF'
 import requests
 import pandas as pd
 import io
@@ -21,4 +20,3 @@ for url, ano in [(url_2025, 2025), (url_2026, 2026)]:
 
 resultado = pd.concat(dfs)
 print(resultado.head(10).to_string())
-EOF
