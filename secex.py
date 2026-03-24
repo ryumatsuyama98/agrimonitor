@@ -14,8 +14,11 @@ params = {
 ncms = ["12011000", "12019000"]
 todos = []
 
+import time
+
 for ncm in ncms:
     r = requests.get(url, params={**params, "ncm[]": ncm})
     data = r.json()
     print(f"\n--- NCM {ncm} ---")
-    print(data)  # veja a estrutura bruta aqui
+    print(data)
+    time.sleep(12)
