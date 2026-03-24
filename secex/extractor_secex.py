@@ -113,11 +113,12 @@ for ano in anos:
 
         # INSERT OR REPLACE respeita a PRIMARY KEY — não duplica
         df_agg.to_sql("exportacoes", conn, if_exists="append", index=False, method="multi")
+        df_agg.to_sql("exportacoes_temp", conn, if_exists="replace", index=False)
         conn.execute("""
-            DELETE FROM exportacoes WHERE rowid NOT IN (
-                SELECT MAX(rowid) FROM exportacoes GROUP BY co_ano, co_mes, co_ncm
-            )
+            INSERT OR REPLACE INTO exportacoes
+            SELECT * FROM exportacoes_temp
         """)
+        conn.execute("DROP TABLE exportacoes_temp")
         conn.commit()
 
         novos_registros += len(df_agg)
