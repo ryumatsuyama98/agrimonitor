@@ -15,10 +15,11 @@ ncms = ["12011000", "12019000"]
 todos = []
 
 import time
+import json
 
 for ncm in ncms:
     r = requests.get(url, params={**params, "ncm[]": ncm})
     data = r.json()
     print(f"\n--- NCM {ncm} ---")
-    print(data)
+    print(json.dumps(data, indent=2, ensure_ascii=False))
     time.sleep(12)
