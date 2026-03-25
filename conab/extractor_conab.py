@@ -5,7 +5,7 @@ import io
 import os
 from datetime import datetime
 
-# ── Configurações ──────────────────────────────────────────────────────────────
+# ── Configuracoes ──────────────────────────────────────────────────────────────
 DB_PATH = "conab/conab.db"
 
 URLS = {
@@ -13,15 +13,19 @@ URLS = {
     "cana":  "https://portaldeinformacoes.conab.gov.br/downloads/arquivos/LevantamentoCana.txt",
 }
 
-# Culturas que queremos guardar — nome exato como aparece na coluna PRODUTO do arquivo
-CULTURAS_CONFIG = [
-    {"produto": "SOJA",                          "cultura": "Soja"},
-    {"produto": "MILHO TOTAL (1ª+2ª SAFRAS)",   "cultura": "Milho Total"},
-    {"produto": "ALGODÃO EM PLUMA",              "cultura": "Algodão em Pluma"},
+# Nomes exatos como aparecem na coluna PRODUTO do arquivo da CONAB.
+# Inclui as tres safras do milho separadamente + total (caso exista no arquivo).
+PRODUTOS_GRAOS = [
+    "SOJA",
+    "MILHO 1ª SAFRA",
+    "MILHO 2ª SAFRA",
+    "MILHO 3ª SAFRA",
+    "MILHO TOTAL",
+    "MILHO TOTAL (1ª+2ª SAFRAS)",
+    "MILHO TOTAL (1ª+2ª+3ª SAFRAS)",
+    "ALGODÃO EM PLUMA",
+    "ALGODÃO TOTAL (PLUMA)",
 ]
-
-# Cana vem de arquivo separado — produto fixo
-PRODUTO_CANA = "CANA-DE-AÇÚCAR"
 
 # ── Inicializa banco ───────────────────────────────────────────────────────────
 os.makedirs("conab", exist_ok=True)
@@ -30,26 +34,26 @@ conn = sqlite3.connect(DB_PATH)
 conn.execute("""
     CREATE TABLE IF NOT EXISTS safra (
         produto        TEXT,
-        cultura        TEXT,
         safra          TEXT,
         levantamento   INTEGER,
+        estado         TEXT,
         area_mil_ha    REAL,
         produtividade  REAL,
         producao_mil_t REAL,
         updated_at     TEXT,
-        PRIMARY KEY (produto, safra, levantamento)
+        PRIMARY KEY (produto, safra, levantamento, estado)
     )
 """)
 conn.commit()
 
-# ── Função auxiliar de download ────────────────────────────────────────────────
+# ── Utilitarios ────────────────────────────────────────────────────────────────
 def baixa_txt(url):
     print(f"Baixando {url}...")
-    r = requests.get(url, timeout=120, verify=False)
+    r = requests.get(url, timeout=180, verify=False)
     r.raise_for_status()
     df = pd.read_csv(io.StringIO(r.content.decode("latin1")), sep=";", dtype=str)
     df.columns = [c.strip() for c in df.columns]
-    print(f"  → {len(df)} linhas, colunas: {list(df.columns)}")
+    print(f"  -> {len(df)} linhas, colunas: {list(df.columns)}")
     return df
 
 def parse_float(val):
@@ -58,97 +62,82 @@ def parse_float(val):
     except (ValueError, AttributeError):
         return None
 
-# ── Grãos (Soja, Milho, Algodão) ──────────────────────────────────────────────
-produtos_alvo   = [c["produto"]  for c in CULTURAS_CONFIG]
-produto_cultura = {c["produto"]: c["cultura"] for c in CULTURAS_CONFIG}
+def col(df, *palavras):
+    for p in palavras:
+        c = next((c for c in df.columns if p.upper() in c.upper()), None)
+        if c:
+            return c
+    return None
 
+def upsert(conn, df):
+    df.to_sql("safra", conn, if_exists="append", index=False, method="multi")
+    conn.execute("""
+        DELETE FROM safra WHERE rowid NOT IN (
+            SELECT MAX(rowid) FROM safra GROUP BY produto, safra, levantamento, estado
+        )
+    """)
+    conn.commit()
+
+# ── Graos (Soja, Milho 1a/2a/3a, Algodao) ─────────────────────────────────────
 try:
     df_graos = baixa_txt(URLS["graos"])
 
-    # Filtra só as culturas desejadas e apenas a linha de total Brasil
-    # (sem coluna de estado, ou estado vazio/nulo = linha de consolidado nacional)
-    col_produto = next(c for c in df_graos.columns if "PRODUTO" in c.upper())
-    col_safra   = next(c for c in df_graos.columns if "SAFRA"   in c.upper())
-    col_lev     = next(c for c in df_graos.columns if "LEVANTAMENTO" in c.upper())
-    col_area    = next(c for c in df_graos.columns if "AREA"    in c.upper())
-    col_prod    = next(c for c in df_graos.columns if "PRODUTIVIDADE" in c.upper())
-    col_prodc   = next(c for c in df_graos.columns if "PRODUCAO" in c.upper() or "PRODUÇÃO" in c.upper())
+    c_prod   = col(df_graos, "PRODUTO")
+    c_safra  = col(df_graos, "SAFRA")
+    c_lev    = col(df_graos, "LEVANTAMENTO")
+    c_estado = col(df_graos, "ESTADO", "UF")
+    c_area   = col(df_graos, "AREA")
+    c_produ  = col(df_graos, "PRODUTIVIDADE")
+    c_prodc  = col(df_graos, "PRODUCAO", "PRODUCAO")
 
-    # Linha de total Brasil = sem estado ou estado == "BRASIL"
-    col_estado = next((c for c in df_graos.columns if c.upper() in ("ESTADO", "UF")), None)
-    if col_estado:
-        df_graos = df_graos[
-            df_graos[col_estado].isna() |
-            df_graos[col_estado].str.strip().str.upper().isin(["", "BRASIL"])
-        ]
+    df_graos = df_graos[df_graos[c_prod].str.strip().isin(PRODUTOS_GRAOS)].copy()
 
-    df_graos = df_graos[df_graos[col_produto].str.strip().isin(produtos_alvo)].copy()
-
-    df_graos["produto"]        = df_graos[col_produto].str.strip()
-    df_graos["cultura"]        = df_graos["produto"].map(produto_cultura)
-    df_graos["safra"]          = df_graos[col_safra].str.strip()
-    df_graos["levantamento"]   = pd.to_numeric(df_graos[col_lev], errors="coerce")
-    df_graos["area_mil_ha"]    = df_graos[col_area].apply(parse_float)
-    df_graos["produtividade"]  = df_graos[col_prod].apply(parse_float)
-    df_graos["producao_mil_t"] = df_graos[col_prodc].apply(parse_float)
+    df_graos["produto"]        = df_graos[c_prod].str.strip()
+    df_graos["safra"]          = df_graos[c_safra].str.strip()
+    df_graos["levantamento"]   = pd.to_numeric(df_graos[c_lev], errors="coerce").astype("Int64")
+    df_graos["estado"]         = df_graos[c_estado].str.strip() if c_estado else "BRASIL"
+    df_graos["area_mil_ha"]    = df_graos[c_area].apply(parse_float)
+    df_graos["produtividade"]  = df_graos[c_produ].apply(parse_float)
+    df_graos["producao_mil_t"] = df_graos[c_prodc].apply(parse_float)
     df_graos["updated_at"]     = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    df_graos = df_graos[["produto","cultura","safra","levantamento",
+    df_final = df_graos[["produto","safra","levantamento","estado",
                           "area_mil_ha","produtividade","producao_mil_t","updated_at"]]
 
-    df_graos.to_sql("safra", conn, if_exists="append", index=False, method="multi")
-    conn.execute("""
-        DELETE FROM safra WHERE rowid NOT IN (
-            SELECT MAX(rowid) FROM safra GROUP BY produto, safra, levantamento
-        )
-    """)
-    conn.commit()
-    print(f"  ✅ {len(df_graos)} registros de grãos inseridos/atualizados.")
+    upsert(conn, df_final)
+    print(f"  OK {len(df_final)} registros de graos inseridos/atualizados.")
 
 except Exception as e:
-    print(f"  ❌ Erro ao processar grãos: {e}")
+    print(f"  ERRO ao processar graos: {e}")
 
-# ── Cana-de-Açúcar ─────────────────────────────────────────────────────────────
+# ── Cana-de-Acucar ─────────────────────────────────────────────────────────────
 try:
     df_cana = baixa_txt(URLS["cana"])
 
-    col_safra  = next(c for c in df_cana.columns if "SAFRA"        in c.upper())
-    col_lev    = next(c for c in df_cana.columns if "LEVANTAMENTO" in c.upper())
-    col_area   = next(c for c in df_cana.columns if "AREA"         in c.upper())
-    col_prod   = next(c for c in df_cana.columns if "PRODUTIVIDADE" in c.upper())
-    col_prodc  = next(c for c in df_cana.columns if "PRODUCAO" in c.upper() or "PRODUÇÃO" in c.upper())
+    c_safra  = col(df_cana, "SAFRA")
+    c_lev    = col(df_cana, "LEVANTAMENTO")
+    c_estado = col(df_cana, "ESTADO", "UF")
+    c_area   = col(df_cana, "AREA")
+    c_produ  = col(df_cana, "PRODUTIVIDADE")
+    c_prodc  = col(df_cana, "PRODUCAO", "PRODUCAO")
 
-    # Linha de total Brasil
-    col_estado = next((c for c in df_cana.columns if c.upper() in ("ESTADO", "UF")), None)
-    if col_estado:
-        df_cana = df_cana[
-            df_cana[col_estado].isna() |
-            df_cana[col_estado].str.strip().str.upper().isin(["", "BRASIL"])
-        ]
-
-    df_cana["produto"]        = PRODUTO_CANA
-    df_cana["cultura"]        = "Cana-de-Açúcar"
-    df_cana["safra"]          = df_cana[col_safra].str.strip()
-    df_cana["levantamento"]   = pd.to_numeric(df_cana[col_lev], errors="coerce")
-    df_cana["area_mil_ha"]    = df_cana[col_area].apply(parse_float)
-    df_cana["produtividade"]  = df_cana[col_prod].apply(parse_float)
-    df_cana["producao_mil_t"] = df_cana[col_prodc].apply(parse_float)
+    df_cana["produto"]        = "CANA-DE-ACUCAR"
+    df_cana["safra"]          = df_cana[c_safra].str.strip()
+    df_cana["levantamento"]   = pd.to_numeric(df_cana[c_lev], errors="coerce").astype("Int64")
+    df_cana["estado"]         = df_cana[c_estado].str.strip() if c_estado else "BRASIL"
+    df_cana["area_mil_ha"]    = df_cana[c_area].apply(parse_float)
+    df_cana["produtividade"]  = df_cana[c_produ].apply(parse_float)
+    df_cana["producao_mil_t"] = df_cana[c_prodc].apply(parse_float)
     df_cana["updated_at"]     = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    df_cana = df_cana[["produto","cultura","safra","levantamento",
-                        "area_mil_ha","produtividade","producao_mil_t","updated_at"]]
+    df_final_c = df_cana[["produto","safra","levantamento","estado",
+                           "area_mil_ha","produtividade","producao_mil_t","updated_at"]]
 
-    df_cana.to_sql("safra", conn, if_exists="append", index=False, method="multi")
-    conn.execute("""
-        DELETE FROM safra WHERE rowid NOT IN (
-            SELECT MAX(rowid) FROM safra GROUP BY produto, safra, levantamento
-        )
-    """)
-    conn.commit()
-    print(f"  ✅ {len(df_cana)} registros de cana inseridos/atualizados.")
+    upsert(conn, df_final_c)
+    print(f"  OK {len(df_final_c)} registros de cana inseridos/atualizados.")
 
 except Exception as e:
-    print(f"  ❌ Erro ao processar cana: {e}")
+    print(f"  ERRO ao processar cana: {e}")
 
 conn.close()
-print("\nConcluído.")
+print("\nConcluido.")
